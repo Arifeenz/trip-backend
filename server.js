@@ -10,18 +10,18 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-// ✅ ตรวจสอบว่า env พร้อม
+// ✅ ตรวจสอบว่า env ครบ
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.OPENAI_API_KEY) {
   throw new Error('❌ Missing environment variables')
 }
 
-// ✅ Supabase client
+// ✅ สร้าง Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-// ✅ OpenAI client
+// ✅ สร้าง OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 })
@@ -30,54 +30,89 @@ const openai = new OpenAI({
 app.post('/generate-trip-plan', async (req, res) => {
   try {
     const { province, style, budget, days } = req.body
-
     console.log('📥 รับข้อมูล:', { province, style, budget, days })
 
-    console.log("✅ BODY:", req.body);
-console.log("📍 Searching for province:", province);
-
-    // ✅ JOIN กับ destinations เพื่อเข้าถึง province
-    const { data: activities, error } = await supabase
+    // ✅ ดึงกิจกรรม
+    const { data: activities, error: activityError } = await supabase
       .from('activities')
       .select('*, destinations!inner(province)')
       .ilike('destinations.province', `%${province}%`)
 
-    if (error) {
-      console.error('❌ Supabase error:', error)
+    if (activityError) {
+      console.error('❌ Supabase error (activities):', activityError)
       return res.status(500).json({ error: 'Failed to fetch activities' })
     }
-
-    if (!activities || activities.length === 0) {
-      return res.status(404).json({ error: 'No activities found for this province' })
-    }
-
-    console.log('📌 raw activities from Supabase:', activities)
 
     const activityText = activities
       .map((a) => `- ${a.name}: ${a.description || 'ไม่มีคำอธิบาย'}`)
       .join('\n')
 
-    //console.log('🧭 กิจกรรมที่ดึงมาจาก Supabase:', activityText)
+    // ✅ ดึงร้านอาหาร
+    const { data: restaurants, error: restaurantError } = await supabase
+      .from('restaurants')
+      .select('*')
+      .ilike('province', `%${province}%`)
 
+    if (restaurantError) {
+      console.error('❌ Supabase error (restaurants):', restaurantError)
+      return res.status(500).json({ error: 'Failed to fetch restaurants' })
+    }
+
+    const restaurantText = restaurants
+      .map((r) => `- ${r.name}: ${r.description || 'ไม่มีคำอธิบาย'}`)
+      .join('\n')
+
+    // ✅ ดึงโรงแรม
+    const { data: hotels, error: hotelError } = await supabase
+      .from('hotels')
+      .select('*')
+      .ilike('province', `%${province}%`)
+
+    if (hotelError) {
+      console.error('❌ Supabase error (hotels):', hotelError)
+      return res.status(500).json({ error: 'Failed to fetch hotels' })
+    }
+
+    const hotelText = hotels
+      .map((h) => `- ${h.name}: ${h.description || 'ไม่มีคำอธิบาย'}`)
+      .join('\n')
+
+    // ✅ แสดง log ตรวจสอบ
+    console.log('🧭 กิจกรรม:', activityText)
+    console.log('🍛 ร้านอาหาร:', restaurantText)
+    console.log('🏨 โรงแรม:', hotelText)
+
+    // ✅ สร้าง Prompt ให้ GPT
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         {
           role: 'system',
-          content: 'คุณคือผู้ช่วยวางแผนเที่ยวที่ตอบกลับเป็นภาษาไทยเท่านั้น โดยใช้ข้อมูลกิจกรรมที่กำหนด'
+          content: `คุณคือผู้ช่วยวางแผนเที่ยวที่ใช้เฉพาะข้อมูลจาก Supabase ที่ให้ไว้เท่านั้น ห้ามแต่งเพิ่มเอง`
         },
         {
           role: 'user',
           content: `
-วางแผนเที่ยว ${province} สไตล์ ${style} เป็นเวลา ${days} วัน งบประมาณ ${budget} บาท
-โดยใช้กิจกรรมเหล่านี้เท่านั้น:
+วางแผนเที่ยว **${province}** แบบ **${style}** จำนวน **${days} วัน** ด้วยงบประมาณระดับ **${budget}**
 
+✅ ให้เลือกเฉพาะจากรายการเหล่านี้เท่านั้น:
+
+🧭 **กิจกรรม**
 ${activityText}
 
-แบ่งแผนเที่ยวเป็นรายวัน เช่น เช้า / บ่าย / เย็น และอย่าใช้กิจกรรมที่ไม่มีในรายการ
+🍛 **ร้านอาหาร**
+${restaurantText}
+
+🏨 **โรงแรม**
+${hotelText}
+
+📌 โปรดแบ่งแผนเป็น เช้า / บ่าย / เย็น สำหรับแต่ละวัน
+📌 ห้ามเพิ่มสถานที่หรือกิจกรรมอื่นนอกเหนือจากนี้
+📌 สรุปแผนให้อ่านง่าย
           `
         }
-      ]
+      ],
+      temperature: 0.7
     })
 
     const aiResponse = completion.choices[0].message.content
@@ -88,7 +123,7 @@ ${activityText}
   }
 })
 
-// ✅ Start server
+// ✅ Start Server
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`)
