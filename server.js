@@ -57,7 +57,7 @@ console.log("📍 Searching for province:", province);
       .map((a) => `- ${a.name}: ${a.description || 'ไม่มีคำอธิบาย'}`)
       .join('\n')
 
-    console.log('🧭 กิจกรรมที่ดึงมาจาก Supabase:', activityText)
+    //console.log('🧭 กิจกรรมที่ดึงมาจาก Supabase:', activityText)
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
