@@ -38,9 +38,9 @@ app.post('/generate-trip-plan', async (req, res) => {
 
     // ดึงร้านอาหาร
     const { data: restaurants, error: restaurantError } = await supabase
-      .from('restaurants')
-      .select('*')
-      .ilike('province', `%${province}%`)
+  .from('restaurants')
+  .select('*, destinations!inner(province)')
+  .ilike('destinations.province', `%${province}%`)
 
     if (restaurantError) {
       console.error('❌ Supabase error (restaurants):', restaurantError)
@@ -49,9 +49,9 @@ app.post('/generate-trip-plan', async (req, res) => {
 
     // ดึงโรงแรม
     const { data: hotels, error: hotelError } = await supabase
-      .from('hotels')
-      .select('*')
-      .ilike('province', `%${province}%`)
+  .from('hotels')
+  .select('*, destinations!inner(province)')
+  .ilike('destinations.province', `%${province}%`)
 
     if (hotelError) {
       console.error('❌ Supabase error (hotels):', hotelError)
