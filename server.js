@@ -7,8 +7,8 @@ import dotenv from 'dotenv'
 dotenv.config()
 
 const app = express()
-app.use(express.json())
 app.use(cors())
+app.use(express.json())
 
 // ✅ ตรวจสอบว่า env พร้อม
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.OPENAI_API_KEY) {
