@@ -33,6 +33,9 @@ app.post('/generate-trip-plan', async (req, res) => {
 
     console.log('📥 รับข้อมูล:', { province, style, budget, days })
 
+    console.log("✅ BODY:", req.body);
+console.log("📍 Searching for province:", province);
+
     // ✅ JOIN กับ destinations เพื่อเข้าถึง province
     const { data: activities, error } = await supabase
       .from('activities')
@@ -61,7 +64,7 @@ app.post('/generate-trip-plan', async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: 'คุณคือผู้ช่วยวางแผนเที่ยวโดยใช้ข้อมูลกิจกรรมที่กำหนดเท่านั้น'
+          content: 'คุณคือผู้ช่วยวางแผนเที่ยวที่ตอบกลับเป็นภาษาไทยเท่านั้น โดยใช้ข้อมูลกิจกรรมที่กำหนด'
         },
         {
           role: 'user',
