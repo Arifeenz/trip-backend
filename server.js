@@ -10,29 +10,22 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-// ✅ ตรวจสอบว่า env ครบ
+// ✅ ตรวจสอบ environment
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.OPENAI_API_KEY) {
   throw new Error('❌ Missing environment variables')
 }
 
-// ✅ สร้าง Supabase client
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-)
+// ✅ สร้าง Supabase & OpenAI client
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
-// ✅ สร้าง OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
-
-// ✅ API สร้างแผนเที่ยว
+// ✅ API หลัก
 app.post('/generate-trip-plan', async (req, res) => {
   try {
     const { province, style, budget, days } = req.body
     console.log('📥 รับข้อมูล:', { province, style, budget, days })
 
-    // ✅ ดึงกิจกรรม
+    // ดึงกิจกรรม
     const { data: activities, error: activityError } = await supabase
       .from('activities')
       .select('*, destinations!inner(province)')
@@ -43,11 +36,7 @@ app.post('/generate-trip-plan', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch activities' })
     }
 
-    const activityText = activities
-      .map((a) => `- ${a.name}: ${a.description || 'ไม่มีคำอธิบาย'}`)
-      .join('\n')
-
-    // ✅ ดึงร้านอาหาร
+    // ดึงร้านอาหาร
     const { data: restaurants, error: restaurantError } = await supabase
       .from('restaurants')
       .select('*')
@@ -58,11 +47,7 @@ app.post('/generate-trip-plan', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch restaurants' })
     }
 
-    const restaurantText = restaurants
-      .map((r) => `- ${r.name}: ${r.description || 'ไม่มีคำอธิบาย'}`)
-      .join('\n')
-
-    // ✅ ดึงโรงแรม
+    // ดึงโรงแรม
     const { data: hotels, error: hotelError } = await supabase
       .from('hotels')
       .select('*')
@@ -73,18 +58,28 @@ app.post('/generate-trip-plan', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch hotels' })
     }
 
-    const hotelText = hotels
-      .map((h) => `- ${h.name}: ${h.description || 'ไม่มีคำอธิบาย'}`)
-      .join('\n')
+    // สร้างข้อความแต่ละรายการ
+    const activityText = activities?.length
+      ? activities.map((a) => `- ${a.name}: ${a.description || 'ไม่มีคำอธิบาย'}`).join('\n')
+      : 'ไม่มีข้อมูลกิจกรรมในจังหวัดนี้'
 
-    // ✅ แสดง log ตรวจสอบ
+    const restaurantText = restaurants?.length
+      ? restaurants.map((r) => `- ${r.name}: ${r.description || 'ไม่มีคำอธิบาย'}`).join('\n')
+      : 'ไม่มีข้อมูลร้านอาหารในจังหวัดนี้'
+
+    const hotelText = hotels?.length
+      ? hotels.map((h) => `- ${h.name}: ${h.description || 'ไม่มีคำอธิบาย'}`).join('\n')
+      : 'ไม่มีข้อมูลโรงแรมในจังหวัดนี้'
+
+    // ✅ ตรวจสอบ log
     console.log('🧭 กิจกรรม:', activityText)
     console.log('🍛 ร้านอาหาร:', restaurantText)
     console.log('🏨 โรงแรม:', hotelText)
 
-    // ✅ สร้าง Prompt ให้ GPT
+    // ✅ ส่ง prompt ให้ GPT
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
+      temperature: 0.7,
       messages: [
         {
           role: 'system',
@@ -95,7 +90,7 @@ app.post('/generate-trip-plan', async (req, res) => {
           content: `
 วางแผนเที่ยว **${province}** แบบ **${style}** จำนวน **${days} วัน** ด้วยงบประมาณระดับ **${budget}**
 
-✅ ให้เลือกเฉพาะจากรายการเหล่านี้เท่านั้น:
+✅ ใช้เฉพาะจากรายการเหล่านี้เท่านั้น:
 
 🧭 **กิจกรรม**
 ${activityText}
@@ -106,13 +101,12 @@ ${restaurantText}
 🏨 **โรงแรม**
 ${hotelText}
 
-📌 โปรดแบ่งแผนเป็น เช้า / บ่าย / เย็น สำหรับแต่ละวัน
-📌 ห้ามเพิ่มสถานที่หรือกิจกรรมอื่นนอกเหนือจากนี้
+📌 โปรดแบ่งแผนเป็น **เช้า / บ่าย / เย็น** สำหรับแต่ละวัน  
+📌 ห้ามเพิ่มสถานที่หรือกิจกรรมอื่นนอกเหนือจากนี้  
 📌 สรุปแผนให้อ่านง่าย
           `
         }
-      ],
-      temperature: 0.7
+      ]
     })
 
     const aiResponse = completion.choices[0].message.content
@@ -123,7 +117,7 @@ ${hotelText}
   }
 })
 
-// ✅ Start Server
+// ✅ เริ่มต้นเซิร์ฟเวอร์
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`)
